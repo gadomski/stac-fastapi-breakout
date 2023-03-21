@@ -21,9 +21,12 @@ git filter-repo \
     --path Makefile \
     --path CHANGES.md \
     --path CONTRIBUTING.md \
+    --path RELEASING.md \
     --path LICENSE \
     --path VERSION \
     --path pyproject.toml \
+    --path nginx.conf \
+    --path docker-compose.yml \
     --path docker-compose.docs.yml \
     --path docker-compose.nginx.yml \
     --path docker/Dockerfile \
@@ -31,27 +34,14 @@ git filter-repo \
     --path "docker/docker-compose.$name.yml" \
     --path .github \
     --path scripts \
+    --path docs/ \
+    --path mkdocs.yml \
     --path-rename "stac_fastapi/$name/:" \
-    --path-rename docker/Dockerfile:Dockerfile.dev \
-    --path-rename "docker/Dockerfile.$name:Dockerfile" \
-    --path-rename "docker/docker-compose.$name.yml:docker-compose.yml"
+    --path-rename docker/Dockerfile:Dockerfile
 
 cat <<EOF
 
 ========================
 == git-filter-repo OK ==
 ========================
-
-You're not done yet!!!
-
-1. We couldn't automagically fix the content of the following files, so you're
-   going to have to yourself:
-      - Makefile
-      - Dockerfile.dev
-      - docker-compose.nginx.yaml
-2. Manually add the "load joplin" section back to docker-compose.yaml
-3. Manually change docker-compose.yaml to reference Dockerfile.dev instead of
-   Dockerfile.
-4. Go through the whole repo and make sure tests pass, there aren't any dangling
-   references to other backends, etc.
 EOF

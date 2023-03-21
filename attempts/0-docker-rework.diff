@@ -1,0 +1,265 @@
+diff --git a/Dockerfile b/Dockerfile
+index 1c1afe6..4e8e8a0 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,25 +1,47 @@
+-FROM python:3.8-slim as builder
+-
+-RUN python -m venv /opt/venv
+-
++FROM python:3.8-slim as dependencies
+ ENV PATH="/opt/venv/bin:$PATH"
+-
++RUN python -m venv /opt/venv \
++    && pip install -U pip
+ WORKDIR /app
++COPY setup.py setup.cfg README.md ./
++COPY stac_fastapi/pgstac/__init__.py stac_fastapi/pgstac/version.py stac_fastapi/pgstac/
++RUN pip install . \
++    && rm -rf /opt/venv/lib/python3.8/site-packages/stac_fastapi/pgstac \
++    && rm -rf /opt/venv/lib/python3.8/site-packages/stac_fastapi.pgstac* \
++    && rm -rf *
+ 
+-COPY . /app
+-
+-RUN pip install ./stac_fastapi/types && \
+-    pip install ./stac_fastapi/api && \
+-    pip install ./stac_fastapi/extensions && \
+-    pip install ./stac_fastapi/pgstac[server]
+-
+-
+-FROM python:3.8-slim as pgstac
+ 
+-ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
++FROM dependencies as docs
++ENV PATH="/opt/venv/bin:$PATH"
++WORKDIR /app
++COPY --from=dependencies /opt/venv /opt/venv
++COPY . .
++RUN pip install . pdocs && \
++    rm -rf *
++CMD ["pdocs", \
++    "as_markdown", \
++    "--output_dir", \
++    "docs/api/", \
++    "--exclude_source", \
++    "--overwrite", \
++    "stac_fastapi.pgstac"]
++
++
++FROM dependencies as server
++ARG PORT=8080
++ARG HOST=0.0.0.0
++ENV PATH="/opt/venv/bin:$PATH"
++WORKDIR /app
++COPY --from=dependencies /opt/venv /opt/venv
++COPY . .
++RUN pip install .[server] && \
++    rm -rf *
++CMD uvicorn stac_fastapi.pgstac.app:app --host ${HOST} --port ${PORT}
+ 
+-COPY --from=builder /opt/venv /opt/venv
+ 
++FROM dependencies as dev
+ ENV PATH="/opt/venv/bin:$PATH"
+-
+-CMD ["uvicorn", "stac_fastapi.pgstac.app:app", "--host", "0.0.0.0", "--port", "8080"]
++WORKDIR /app
++COPY --from=dependencies /opt/venv /opt/venv
++COPY . .
++RUN pip install -e .[server,dev]
+diff --git a/Dockerfile.dev b/Dockerfile.dev
+deleted file mode 100644
+index 5c218e2..0000000
+--- a/Dockerfile.dev
++++ /dev/null
+@@ -1,23 +0,0 @@
+-FROM python:3.8-slim as base
+-
+-# Any python libraries that require system libraries to be installed will likely
+-# need the following packages in order to build
+-RUN apt-get update && \
+-    apt-get -y upgrade && \
+-    apt-get install -y build-essential git && \
+-    apt-get clean && \
+-    rm -rf /var/lib/apt/lists/*
+-
+-ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+-
+-FROM base as builder
+-
+-WORKDIR /app
+-
+-COPY . /app
+-
+-RUN pip install -e ./stac_fastapi/types[dev] && \
+-    pip install -e ./stac_fastapi/api[dev] && \
+-    pip install -e ./stac_fastapi/extensions[dev] && \
+-    pip install -e ./stac_fastapi/sqlalchemy[dev,server] && \
+-    pip install -e ./stac_fastapi/pgstac[dev,server]
+diff --git a/Makefile b/Makefile
+index fbeb7d8..fb2119b 100644
+--- a/Makefile
++++ b/Makefile
+@@ -2,42 +2,19 @@
+ APP_HOST ?= 0.0.0.0
+ APP_PORT ?= 8080
+ EXTERNAL_APP_PORT ?= ${APP_PORT}
+-run_sqlalchemy = docker-compose run --rm \
+-				-p ${EXTERNAL_APP_PORT}:${APP_PORT} \
+-				-e APP_HOST=${APP_HOST} \
+-				-e APP_PORT=${APP_PORT} \
+-				app-sqlalchemy
+-
+-run_pgstac = docker-compose run --rm \
+-				-p ${EXTERNAL_APP_PORT}:${APP_PORT} \
+-				-e APP_HOST=${APP_HOST} \
+-				-e APP_PORT=${APP_PORT} \
+-				app-pgstac
+ 
+ .PHONY: image
+ image:
+ 	docker-compose build
+ 
+-.PHONY: docker-run-all
++.PHONY: docker-run
+ docker-run-all:
+ 	docker-compose up
+ 
+-.PHONY: docker-run-sqlalchemy
+-docker-run-sqlalchemy: image
+-	$(run_sqlalchemy)
+-
+-.PHONY: docker-run-pgstac
+-docker-run-pgstac: image
+-	$(run_pgstac)
+-
+ .PHONY: docker-run-nginx-proxy
+ docker-run-nginx-proxy:
+ 	docker-compose -f docker-compose.yml -f docker-compose.nginx.yml up
+ 
+-.PHONY: docker-shell-sqlalchemy
+-docker-shell-sqlalchemy:
+-	$(run_sqlalchemy) /bin/bash
+-
+ .PHONY: docker-shell-pgstac
+ docker-shell-pgstac:
+ 	$(run_pgstac) /bin/bash
+diff --git a/docker-compose.docs.yml b/docker-compose.docs.yml
+index 5ed8778..9d2651a 100644
+--- a/docker-compose.docs.yml
++++ b/docker-compose.docs.yml
+@@ -5,7 +5,8 @@ services:
+     container_name: stac-fastapi-docs-dev
+     build:
+       context: .
+-      dockerfile: docker/Dockerfile.docs
++      dockerfile: Dockerfile
++      target: docs
+     platform: linux/amd64
+     environment:
+       - POSTGRES_USER=username
+@@ -15,4 +16,4 @@ services:
+       - POSTGRES_HOST_WRITER=database
+       - POSTGRES_PORT=5432
+     volumes:
+-      - .:/opt/src
++      - .:/app
+diff --git a/docker-compose.nginx.yml b/docker-compose.nginx.yml
+index b70bffe..2f84ba5 100644
+--- a/docker-compose.nginx.yml
++++ b/docker-compose.nginx.yml
+@@ -1,18 +1,16 @@
+ version: '3'
+ services:
+   nginx:
++    container_name: nginx
+     image: nginx
+     ports:
+       - ${STAC_FASTAPI_NGINX_PORT:-80}:80
+     volumes:
+       - ./nginx.conf:/etc/nginx/nginx.conf
+     depends_on:
+-      - app-pgstac
+-      - app-sqlalchemy
++      - stac-fastapi-pgstac
+     command: [ "nginx-debug", "-g", "daemon off;" ]
+-  app-pgstac:
++
++  stac-fastapi-pgstac:
+     environment:
+       - UVICORN_ROOT_PATH=/api/v1/pgstac
+-  app-sqlalchemy:
+-    environment:
+-      - UVICORN_ROOT_PATH=/api/v1/sqlalchemy
+diff --git a/docker-compose.yml b/docker-compose.yml
+index b95cba0..6e5fc43 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -1,7 +1,10 @@
+ version: '3'
+ services:
+   stac-fastapi-pgstac:
+-    image: ghcr.io/stac-utils/stac-fastapi:latest-pgstac
++    container_name: stac-fastapi-pgstac
++    build:
++      context: .
++      target: dev
+     platform: linux/amd64
+     environment:
+       - APP_HOST=0.0.0.0
+@@ -20,11 +23,13 @@ services:
+       - DB_MAX_CONN_SIZE=1
+       - USE_API_HYDRATE=${USE_API_HYDRATE:-false}
+     ports:
+-      - "8080:8080"
++      - "8000:8000"
+     depends_on:
+       - pgstac
++    command: bash -c "./scripts/wait-for-it.sh pgstac:5432 && python -m stac_fastapi.pgstac.app"
+ 
+   pgstac:
++    container_name: pgstac
+     image: ghcr.io/stac-utils/pgstac:v0.7.1
+     environment:
+       - POSTGRES_USER=username
+diff --git a/nginx.conf b/nginx.conf
+new file mode 100644
+index 0000000..73d2468
+--- /dev/null
++++ b/nginx.conf
+@@ -0,0 +1,20 @@
++events {}
++
++http {
++    server {
++        listen   80;
++
++        location /api/v1/pgstac {
++            rewrite ^/api/v1/pgstac(.*)$ $1 break;
++            proxy_pass http://stac-fastapi-pgstac:8000;
++            proxy_set_header HOST $host;
++            proxy_set_header Referer $http_referer;
++            proxy_set_header X-Forwarded-For $remote_addr;
++            proxy_set_header X-Forwarded-Proto $scheme;
++        }
++
++        location / {
++            proxy_redirect off;
++        }
++    }
++}
+\ No newline at end of file
+diff --git a/setup.py b/setup.py
+index 6632ff0..2649191 100644
+--- a/setup.py
++++ b/setup.py
+@@ -54,7 +54,7 @@ setup(
+     author_email="david@developmentseed.org",
+     url="https://github.com/stac-utils/stac-fastapi",
+     license="MIT",
+-    packages=find_namespace_packages(exclude=["alembic", "tests", "scripts"]),
++    packages=find_namespace_packages(exclude=["tests", "scripts"]),
+     zip_safe=False,
+     install_requires=install_requires,
+     tests_require=extra_reqs["dev"],
