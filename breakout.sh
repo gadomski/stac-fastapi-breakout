@@ -31,13 +31,15 @@ git filter-repo \
     --path docker-compose.docs.yml \
     --path docker-compose.nginx.yml \
     --path docker/Dockerfile \
+    --path docker/Dockerfile.docs \
     --path .github \
     --path scripts \
     --path docs/ \
     --path mkdocs.yml \
     --path-rename "stac_fastapi/$name/:" \
     --path-rename stac_fastapi/testdata:testdata \
-    --path-rename docker/Dockerfile:Dockerfile
+    --path-rename docker/Dockerfile:Dockerfile \
+    --path-rename docker/Dockerfile.docs:Dockerfile.docs
 
 cat <<EOF
 
