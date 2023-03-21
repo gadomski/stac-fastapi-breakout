@@ -15,6 +15,7 @@ git clone --branch main --no-hardlinks --no-local --single-branch "$1" "$directo
 cd "$directory"
 git filter-repo \
     --path "stac_fastapi/$name/" \
+    --path stac_fastapi/testdata/ \
     --path .dockerignore \
     --path .gitignore \
     --path .pre-commit-config.yaml \
@@ -30,13 +31,12 @@ git filter-repo \
     --path docker-compose.docs.yml \
     --path docker-compose.nginx.yml \
     --path docker/Dockerfile \
-    --path "docker/Dockerfile.$name" \
-    --path "docker/docker-compose.$name.yml" \
     --path .github \
     --path scripts \
     --path docs/ \
     --path mkdocs.yml \
     --path-rename "stac_fastapi/$name/:" \
+    --path-rename stac_fastapi/testdata:testdata \
     --path-rename docker/Dockerfile:Dockerfile
 
 cat <<EOF

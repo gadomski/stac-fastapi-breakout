@@ -1,0 +1,481 @@
+diff --git a/.github/dependabot.yml b/.github/dependabot.yml
+index 465c88f..11dd2d7 100644
+--- a/.github/dependabot.yml
++++ b/.github/dependabot.yml
+@@ -9,26 +9,6 @@ updates:
+     schedule:
+       interval: weekly
+   - package-ecosystem: pip
+-    directory: "/stac_fastapi/api"
+-    schedule:
+-      interval: weekly
+-  - package-ecosystem: pip
+-    directory: "/stac_fastapi/api"
+-    schedule:
+-      interval: weekly
+-  - package-ecosystem: pip
+-    directory: "/stac_fastapi/types"
+-    schedule:
+-      interval: weekly
+-  - package-ecosystem: pip
+-    directory: "/stac_fastapi/extensions"
+-    schedule:
+-      interval: weekly
+-  - package-ecosystem: pip
+-    directory: "/stac_fastapi/pgstac"
+-    schedule:
+-      interval: weekly
+-  - package-ecosystem: pip
+-    directory: "/stac_fastapi/sqlalchemy"
++    directory: "/"
+     schedule:
+       interval: weekly
+diff --git a/.github/workflows/cicd.yaml b/.github/workflows/cicd.yaml
+index 6f4eadd..297fbad 100644
+--- a/.github/workflows/cicd.yaml
++++ b/.github/workflows/cicd.yaml
+@@ -53,67 +53,12 @@ jobs:
+           python -m pip install pre-commit
+           pre-commit run --all-files
+ 
+-      - name: Install pipenv
++      - name: Install
+         run: |
+-          python -m pip install --upgrade pipenv wheel
+-
+-      - name: Install types
+-        run: |
+-          pip install ./stac_fastapi/types[dev]
+-
+-      - name: Install core api
+-        run: |
+-          pip install ./stac_fastapi/api[dev]
+-
+-      - name: Install Extensions
+-        run: |
+-          pip install ./stac_fastapi/extensions[dev]
+-
+-      - name: Install sqlalchemy stac-fastapi
+-        run: |
+-          pip install ./stac_fastapi/sqlalchemy[dev,server]
+-
+-      - name: Install pgstac stac-fastapi
+-        run: |
+-          pip install ./stac_fastapi/pgstac[dev,server]
+-
+-      - name: Run migration
+-        run: |
+-          cd stac_fastapi/sqlalchemy && alembic upgrade head
+-        env:
+-          POSTGRES_USER: username
+-          POSTGRES_PASS: password
+-          POSTGRES_DBNAME: postgis
+-          POSTGRES_HOST: localhost
+-          POSTGRES_PORT: 5432
+-
+-      - name: Run test suite
+-        run: |
+-          cd stac_fastapi/api && pipenv run pytest -svvv
+-        env:
+-          ENVIRONMENT: testing
+-
+-      - name: Run test suite
+-        run: |
+-          cd stac_fastapi/types && pipenv run pytest -svvv
+-        env:
+-          ENVIRONMENT: testing
+-
+-      - name: Run test suite
+-        run: |
+-          cd stac_fastapi/sqlalchemy && pipenv run pytest -svvv
+-        env:
+-          ENVIRONMENT: testing
+-          POSTGRES_USER: username
+-          POSTGRES_PASS: password
+-          POSTGRES_DBNAME: postgis
+-          POSTGRES_HOST_READER: localhost
+-          POSTGRES_HOST_WRITER: localhost
+-          POSTGRES_PORT: 5432
++          pip install .[dev,server]
+ 
+       - name: Run test suite
+-        run: |
+-          cd stac_fastapi/pgstac && pipenv run pytest -svvv
++        run: make test
+         env:
+           ENVIRONMENT: testing
+           POSTGRES_USER: username
+@@ -125,10 +70,6 @@ jobs:
+ 
+   validate:
+     runs-on: ubuntu-latest
+-    strategy:
+-      fail-fast: false
+-      matrix:
+-        backend: ["sqlalchemy", "pgstac"]
+     services:
+       pgstac:
+         image: ghcr.io/stac-utils/pgstac:v0.7.1
+@@ -155,20 +96,11 @@ jobs:
+         with:
+           python-version: "3.10"
+           cache: pip
+-          cache-dependency-path: stac_fastapi/pgstac/setup.cfg
++          cache-dependency-path: setup.cfg
+       - name: Install stac-fastapi and stac-api-validator
+-        run: pip install ./stac_fastapi/api ./stac_fastapi/types ./stac_fastapi/${{ matrix.backend }}[server] stac-api-validator==0.4.1
+-      - name: Run migration
+-        if: ${{ matrix.backend == 'sqlalchemy' }}
+-        run: cd stac_fastapi/sqlalchemy && alembic upgrade head
+-        env:
+-          POSTGRES_USER: username
+-          POSTGRES_PASS: password
+-          POSTGRES_DBNAME: postgis
+-          POSTGRES_HOST: localhost
+-          POSTGRES_PORT: 5432
++        run: pip install .[server] stac-api-validator==0.4.1
+       - name: Load data and validate
+-        run: python -m stac_fastapi.${{ matrix.backend }}.app & ./scripts/wait-for-it.sh localhost:8080 && python ./scripts/ingest_joplin.py http://localhost:8080 && ./scripts/validate http://localhost:8080
++        run: python -m stac_fastapi.pgstac.app & ./scripts/wait-for-it.sh localhost:8080 && python ./scripts/ingest_joplin.py http://localhost:8080 && ./scripts/validate http://localhost:8080
+         env:
+           POSTGRES_USER: username
+           POSTGRES_PASS: password
+diff --git a/.github/workflows/deploy_mkdocs.yml b/.github/workflows/deploy_mkdocs.yml
+index 546718a..0354142 100644
+--- a/.github/workflows/deploy_mkdocs.yml
++++ b/.github/workflows/deploy_mkdocs.yml
+@@ -28,20 +28,16 @@ jobs:
+       - name: Install dependencies
+         run: |
+           python -m pip install --upgrade pip
+-          python -m pip install -e \
+-            stac_fastapi/api \
+-            stac_fastapi/types \
+-            stac_fastapi/extensions \
+-            stac_fastapi/sqlalchemy
++          python -m pip install -e .
+           python -m pip install mkdocs mkdocs-material pdocs
+ 
+-      - name: update API docs
++      - name: Update API docs
+         run: |
+           pdocs as_markdown \
+             --output_dir docs/api/ \
+             --exclude_source \
+             --overwrite \
+-            stac_fastapi
++            stac_fastapi.pgstac
+         env:
+           POSTGRES_USER: username
+           POSTGRES_PASS: password
+diff --git a/Dockerfile b/Dockerfile
+index 5c218e2..1bd8331 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -16,8 +16,4 @@ WORKDIR /app
+ 
+ COPY . /app
+ 
+-RUN pip install -e ./stac_fastapi/types[dev] && \
+-    pip install -e ./stac_fastapi/api[dev] && \
+-    pip install -e ./stac_fastapi/extensions[dev] && \
+-    pip install -e ./stac_fastapi/sqlalchemy[dev,server] && \
+-    pip install -e ./stac_fastapi/pgstac[dev,server]
++RUN pip install -e .[dev,server]
+diff --git a/Makefile b/Makefile
+index fbeb7d8..598cc6d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -2,87 +2,44 @@
+ APP_HOST ?= 0.0.0.0
+ APP_PORT ?= 8080
+ EXTERNAL_APP_PORT ?= ${APP_PORT}
+-run_sqlalchemy = docker-compose run --rm \
+-				-p ${EXTERNAL_APP_PORT}:${APP_PORT} \
+-				-e APP_HOST=${APP_HOST} \
+-				-e APP_PORT=${APP_PORT} \
+-				app-sqlalchemy
+ 
+-run_pgstac = docker-compose run --rm \
++run = docker-compose run --rm \
+ 				-p ${EXTERNAL_APP_PORT}:${APP_PORT} \
+ 				-e APP_HOST=${APP_HOST} \
+ 				-e APP_PORT=${APP_PORT} \
+-				app-pgstac
++				app
+ 
+ .PHONY: image
+ image:
+ 	docker-compose build
+ 
+-.PHONY: docker-run-all
+-docker-run-all:
+-	docker-compose up
+-
+-.PHONY: docker-run-sqlalchemy
+-docker-run-sqlalchemy: image
+-	$(run_sqlalchemy)
+-
+ .PHONY: docker-run-pgstac
+-docker-run-pgstac: image
+-	$(run_pgstac)
++docker-run: image
++	$(run)
+ 
+ .PHONY: docker-run-nginx-proxy
+ docker-run-nginx-proxy:
+ 	docker-compose -f docker-compose.yml -f docker-compose.nginx.yml up
+ 
+-.PHONY: docker-shell-sqlalchemy
+-docker-shell-sqlalchemy:
+-	$(run_sqlalchemy) /bin/bash
+-
+-.PHONY: docker-shell-pgstac
+-docker-shell-pgstac:
+-	$(run_pgstac) /bin/bash
+-
+-.PHONY: test-sqlalchemy
+-test-sqlalchemy: run-joplin-sqlalchemy
+-	$(run_sqlalchemy) /bin/bash -c 'export && ./scripts/wait-for-it.sh database:5432 && cd /app/stac_fastapi/sqlalchemy/tests/ && pytest -vvv'
++.PHONY: docker-shell
++docker-shell:
++	$(run) /bin/bash
+ 
+-.PHONY: test-pgstac
+-test-pgstac:
+-	$(run_pgstac) /bin/bash -c 'export && ./scripts/wait-for-it.sh database:5432 && cd /app/stac_fastapi/pgstac/tests/ && pytest -vvv'
+-
+-.PHONY: test-api
+-test-api:
+-	$(run_sqlalchemy) /bin/bash -c 'cd /app/stac_fastapi/api && pytest -svvv'
++.PHONY: test
++test:
++	$(run) /bin/bash -c 'export && ./scripts/wait-for-it.sh database:5432 && cd /app/tests/ && pytest -vvv'
+ 
+ .PHONY: run-database
+ run-database:
+ 	docker-compose run --rm database
+ 
+-.PHONY: run-joplin-sqlalchemy
+-run-joplin-sqlalchemy:
+-	docker-compose run --rm loadjoplin-sqlalchemy
+-
+-.PHONY: run-joplin-pgstac
+-run-joplin-pgstac:
+-	docker-compose run --rm loadjoplin-pgstac
+-
+-.PHONY: test
+-test: test-sqlalchemy test-pgstac
+-
+-.PHONY: pybase-install
+-pybase-install:
+-	pip install wheel && \
+-	pip install -e ./stac_fastapi/api[dev] && \
+-	pip install -e ./stac_fastapi/types[dev] && \
+-	pip install -e ./stac_fastapi/extensions[dev]
+-
+-.PHONY: pgstac-install
+-pgstac-install: pybase-install
+-	pip install -e ./stac_fastapi/pgstac[dev,server]
++.PHONY: run-joplin
++run-joplin:
++	docker-compose run --rm loadjoplin
+ 
+-.PHONY: sqlalchemy-install
+-sqlalchemy-install: pybase-install
+-	pip install -e ./stac_fastapi/sqlalchemy[dev,server]
++.PHONY: install
++install:
++	pip install -e .[dev,server]
+ 
+ .PHONY: docs-image
+ docs-image:
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 5637f7e..272f637 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -1,37 +1,10 @@
+ version: '3'
+ services:
+-  app-sqlalchemy:
+-    container_name: stac-fastapi-sqlalchemy
+-    image: stac-utils/stac-fastapi
+-    build:
+-      context: .
+-      dockerfile: docker/Dockerfile
+-    platform: linux/amd64
+-    environment:
+-      - APP_HOST=0.0.0.0
+-      - APP_PORT=8081
+-      - RELOAD=true
+-      - ENVIRONMENT=local
+-      - POSTGRES_USER=username
+-      - POSTGRES_PASS=password
+-      - POSTGRES_DBNAME=postgis
+-      - POSTGRES_HOST_READER=database
+-      - POSTGRES_HOST_WRITER=database
+-      - POSTGRES_PORT=5432
+-      - WEB_CONCURRENCY=10
+-    ports:
+-      - "8081:8081"
+-    volumes:
+-      - ./stac_fastapi:/app/stac_fastapi
+-      - ./scripts:/app/scripts
+-    depends_on:
+-      - database
+-    command: bash -c "./scripts/wait-for-it.sh database:5432 && python -m stac_fastapi.sqlalchemy.app"
+-
+-  app-pgstac:
++  app:
+     container_name: stac-fastapi-pgstac
+     image: stac-utils/stac-fastapi
+     platform: linux/amd64
++    build: .
+     environment:
+       - APP_HOST=0.0.0.0
+       - APP_PORT=8082
+@@ -73,27 +46,8 @@ services:
+       - "5439:5432"
+     command: postgres -N 500
+ 
+-  # Load joplin demo dataset into the SQLAlchemy Application
+-  loadjoplin-sqlalchemy:
+-    image: stac-utils/stac-fastapi
+-    environment:
+-      - ENVIRONMENT=development
+-      - POSTGRES_USER=username
+-      - POSTGRES_PASS=password
+-      - POSTGRES_DBNAME=postgis
+-      - POSTGRES_HOST=database
+-      - POSTGRES_PORT=5432
+-    volumes:
+-      - ./stac_fastapi:/app/stac_fastapi
+-      - ./scripts:/app/scripts
+-    command: >
+-      bash -c "./scripts/wait-for-it.sh app-sqlalchemy:8081 -t 60 && cd stac_fastapi/sqlalchemy && alembic upgrade head && python /app/scripts/ingest_joplin.py http://app-sqlalchemy:8081"
+-    depends_on:
+-      - database
+-      - app-sqlalchemy
+-
+   # Load joplin demo dataset into the PGStac Application
+-  loadjoplin-pgstac:
++  loadjoplin:
+     image: stac-utils/stac-fastapi
+     environment:
+       - ENVIRONMENT=development
+@@ -111,7 +65,7 @@ services:
+       - "http://app-pgstac:8082"
+     depends_on:
+       - database
+-      - app-pgstac
++      - app
+ 
+ networks:
+   default:
+diff --git a/docs/tips-and-tricks.md b/docs/tips-and-tricks.md
+deleted file mode 100644
+index 3d4c9ac..0000000
+--- a/docs/tips-and-tricks.md
++++ /dev/null
+@@ -1,29 +0,0 @@
+-# Tips and Tricks
+-This page contains a few 'tips and tricks' for getting stac-fastapi working in various situations.
+-
+-## Get stac-fastapi working with CORS
+-CORS (Cross-Origin Resource Sharing) support may be required to use stac-fastapi in certain situations. For example, if you are running
+-[stac-browser](https://github.com/radiantearth/stac-browser) to browse the STAC catalog created by stac-fastapi, then you will need to enable CORS support.
+-
+-To do this, edit `stac_fastapi/sqlalchemy/stac_fastapi/sqlalchemy/app.py` (or the equivalent in the `pgstac` folder) and add the following import:
+-
+-```
+-from fastapi.middleware.cors import CORSMiddleware
+-```
+-
+-and then edit the `api = StacApi(...` call to add the following parameter:
+-
+-```
+-middlewares=[lambda app: CORSMiddleware(app, allow_origins=["*"])]
+-```
+-
+-If needed, you can edit the `allow_origins` parameter to only allow CORS requests from specific origins.
+-
+-## Enable the Context extension
+-The Context STAC extension provides information on the number of items matched and returned from a STAC search. This is required by various other STAC-related tools, such as the pystac command-line client. To enable the extension, edit `stac_fastapi/sqlalchemy/stac_fastapi/sqlalchemy/app.py` (or the equivalent in the `pgstac` folder) and add the following import:
+-
+-```
+-from stac_fastapi.extensions.core.context import ContextExtension
+-```
+-
+-and then edit the `api = StacApi(...` call to add `ContextExtension()` to the list given as the `extensions` parameter.
+\ No newline at end of file
+diff --git a/scripts/ingest_joplin.py b/scripts/ingest_joplin.py
+index 76320fa..6d27321 100644
+--- a/scripts/ingest_joplin.py
++++ b/scripts/ingest_joplin.py
+@@ -7,7 +7,7 @@ from urllib.parse import urljoin
+ import requests
+ 
+ workingdir = Path(__file__).parent.absolute()
+-joplindata = workingdir.parent / "stac_fastapi" / "testdata" / "joplin"
++joplindata = workingdir.parent / "testdata" / "joplin"
+ 
+ app_host = sys.argv[1]
+ 
+diff --git a/scripts/publish b/scripts/publish
+index 083b130..54142ab 100755
+--- a/scripts/publish
++++ b/scripts/publish
+@@ -6,15 +6,6 @@ if [[ -n "${CI}" ]]; then
+     set -x
+ fi
+ 
+-# Import shared variables
+-SUBPACKAGE_DIRS=(
+-    "stac_fastapi/types"
+-    "stac_fastapi/extensions"
+-    "stac_fastapi/api"
+-    "stac_fastapi/sqlalchemy"
+-    "stac_fastapi/pgstac"
+-)
+-
+ function usage() {
+     echo -n \
+         "Usage: $(basename "$0")
+@@ -59,14 +50,7 @@ if [ -z "${TEST_PYPI}" ] && [ -z "${CI}" ]; then
+ fi
+ 
+ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+-    for PACKAGE_DIR in "${SUBPACKAGE_DIRS[@]}"
+-    do
+-        echo ${PACKAGE_DIR}
+-        pushd ./${PACKAGE_DIR}
+-        rm -rf dist
+-        python setup.py sdist bdist_wheel
+-        twine upload ${TEST_PYPI} dist/*
+-        popd
+-
+-    done
++    rm -rf dist
++    python setup.py sdist bdist_wheel
++    twine upload ${TEST_PYPI} dist/*
+ fi
+\ No newline at end of file
+diff --git a/setup.py b/setup.py
+index 6632ff0..844aeac 100644
+--- a/setup.py
++++ b/setup.py
+@@ -22,12 +22,14 @@ install_requires = [
+ 
+ extra_reqs = {
+     "dev": [
++        "pystac[validation]",
+         "pypgstac[psycopg]==0.7.*",
+         "pytest",
+         "pytest-cov",
+         "pytest-asyncio>=0.17",
+         "pre-commit",
+         "requests",
++        "shapely",
+         "httpx",
+     ],
+     "docs": ["mkdocs", "mkdocs-material", "pdocs"],
